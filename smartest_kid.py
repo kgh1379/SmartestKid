@@ -2,151 +2,13 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageSequence
 import os
-import wave
-import threading
-import time
-import pyaudio
-import audioop  # For RMS calculations
 import queue
 from io import BytesIO
 from chat_interface import ChatInterface
+import threading
 
 # Import the new ChatCompletion-based assistant.
 from ai_assistant import ChatCompletionAssistant
-
-# ------------------ Recording with VAD ------------------
-
-def transcribe_file_with_whisper(audio_filename, app):
-    """
-    Uses OpenAI's Whisper API to transcribe a local audio file.
-    Returns only the final transcript string.
-    """
-    try:
-        transcribe_start = time.time()  # Start timing transcription
-        from openai import OpenAI
-        
-        print("Calling Whisper API...")
-        app.is_transcribing = True
-        
-        client = OpenAI(api_key=app.assistant_api_key)
-        
-        with open(audio_filename, "rb") as audio_file:
-            try:
-                response = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="text"
-                )
-                print("[WHISPER] Successfully transcribed audio")
-            except Exception as whisper_error:
-                print(f"[WHISPER] API Error: {str(whisper_error)}")
-                raise
-        
-        transcript_str = response.strip()
-        transcribe_duration = time.time() - transcribe_start
-        print(f"[TIMING] Transcription completed in {transcribe_duration:.2f}s")
-        
-        with open("transcription.txt", "w") as f:
-            f.write(transcript_str)
-        
-        return transcript_str
-        
-    except Exception as e:
-        error_msg = f"Error during Whisper transcription: {str(e)}"
-        app.log(error_msg)
-        print(error_msg)
-        return None
-    finally:
-        app.is_transcribing = False
-
-
-def record_and_transcribe_vad(app):
-    """
-    Records audio until silence is detected using VAD.
-    Saves the audio to a WAV file and transcribes it via Whisper.
-    The transcript is then added to the AI processing queue.
-    """
-    audio_filename = "temp_recording.wav"
-    transcript_filename = "transcription.txt"
-    
-    try:
-        chunk = 1024
-        sample_format = pyaudio.paInt16
-        channels = 1
-        rate = 16000
-        silence_threshold = 200
-        silence_chunks = 0
-
-        pause_duration_sec = 2.5            
-        max_silence_chunks = int(pause_duration_sec / (chunk / rate))
-        min_chunks = int(0.5 / (chunk / rate))
-        frames = []
-
-        p = pyaudio.PyAudio()
-        stream = p.open(format=sample_format, channels=channels, rate=rate,
-                        input=True, frames_per_buffer=chunk)
-        app.log("Recording started (VAD enabled). Speak now...")
-        app.is_listening = False
-        voiced = False
-
-        while True:
-            if app.is_paused:
-                # Always process what we have when muting
-                break
-
-            data = stream.read(chunk, exception_on_overflow=False)
-            frames.append(data)
-            rms = audioop.rms(data, 2)
-            if rms > silence_threshold:
-                silence_chunks = 0
-                voiced = True
-                app.is_listening = True
-            else:
-                if voiced:
-                    silence_chunks += 1
-            if voiced and silence_chunks > max_silence_chunks and len(frames) > min_chunks:
-                app.log("Silence detected. Finishing recording.")
-                break
-
-        # Close the stream after breaking from the loop
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-
-        # Always process the recording if we have enough voiced frames
-        if voiced and len(frames) > min_chunks:
-            wf = wave.open(audio_filename, 'wb')
-            wf.setnchannels(channels)
-            wf.setsampwidth(p.get_sample_size(sample_format))
-            wf.setframerate(rate)
-            wf.writeframes(b''.join(frames))
-            wf.close()
-            app.log("Recording finished. Audio saved to " + audio_filename)
-
-            # Remove the pause check here - always process the final chunk
-            transcript = transcribe_file_with_whisper(audio_filename, app)
-            if transcript:
-                app.log("Transcription: " + transcript)
-                print("Transcription:", transcript)
-                app.message_queue.put(transcript)
-            else:
-                app.log("Whisper transcription failed.")
-    
-    finally:
-        try:
-            if os.path.exists(audio_filename):
-                os.remove(audio_filename)
-                print(f"Cleaned up {audio_filename}")
-            if os.path.exists(transcript_filename):
-                os.remove(transcript_filename)
-                print(f"Cleaned up {transcript_filename}")
-        except Exception as e:
-            print(f"Error cleaning up temporary files: {e}")
-
-def continuous_record_and_transcribe(app):
-    while True:
-        record_and_transcribe_vad(app)
-        # Optionally, add a delay here if desired.
 
 # ------------------ Animated Tkinter Application ------------------
 
@@ -254,7 +116,7 @@ class App(tk.Tk):
         self.message_queue = queue.Queue()
         self._ai_lock = threading.Lock()
         
-        threading.Thread(target=continuous_record_and_transcribe, args=(self,), daemon=True).start()
+        #threading.Thread(target=continuous_record_and_transcribe, args=(self,), daemon=True).start()
         self.animate_robot()
         threading.Thread(target=self.process_ai_messages, daemon=True).start()
         self.create_mode_toggles()
